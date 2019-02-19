@@ -383,7 +383,10 @@ n_train = x_train.shape[0] - n_test
                     target_this = target_this.cuda(non_blocking=True)
 
                 batch_actual_size = inputv_this.shape[0]
-                output = self.neural_net(inputv_this)
+                thetas = self.neural_net(inputv_this)
+                output = (thetas[:, 1:] * inputv_this).sum(1, True)
+                output = output + thetas[:, :1]
+
                 criterion = nn.MSELoss()
                 loss = criterion(output, target_this)
 
@@ -403,7 +406,9 @@ n_train = x_train.shape[0] - n_test
             if self.gpu:
                 inputv = inputv.cuda()
 
-            output_pred = self.neural_net(inputv)
+            thetas = self.neural_net(inputv)
+            output_pred = (thetas[:, 1:] * inputv).sum(1, True)
+            output_pred = output_pred + thetas[:, :1]
 
             return output_pred.data.cpu().numpy()
 
