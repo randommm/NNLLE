@@ -27,9 +27,9 @@ import itertools
 from scipy import stats
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ShuffleSplit
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
 from copy import deepcopy
+from sklearn.preprocessing import StandardScaler
+import collections
 
 def _np_to_tensor(arr):
     arr = np.array(arr, dtype='f4')
@@ -111,6 +111,9 @@ n_train = x_train.shape[0] - n_test
                  batch_test_size=2000,
                  gpu=True,
                  verbose=1,
+
+                 tuningp=0,
+                 scale_data=True,
                  ):
 
         for prop in dir():
@@ -118,6 +121,9 @@ n_train = x_train.shape[0] - n_test
                 setattr(self, prop, locals()[prop])
 
     def fit(self, x_train, y_train):
+        if self.scale_data:
+            self.scaler = StandardScaler()
+            self.scaler.fit(x_train)
         self.gpu = self.gpu and torch.cuda.is_available()
 
         self.x_dim = x_train.shape[1]
@@ -149,6 +155,9 @@ n_train = x_train.shape[0] - n_test
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
         criterion = nn.MSELoss()
+
+        if self.scale_data:
+            x_train = self.scaler.transform(x_train)
 
         assert(self.batch_initial >= 1)
         assert(self.batch_step_multiplier > 0)
@@ -317,12 +326,13 @@ n_train = x_train.shape[0] - n_test
 
                 optimizer.zero_grad()
                 thetas = self.neural_net(inputv_this)
-                grads, = torch.autograd.grad(thetas.sum(), inputv_this,
-                    create_graph=True)
-                output = (thetas * inputv_this).sum(1, True)
+                grads, = torch.autograd.grad(thetas[:, 1:].sum(),
+                    inputv_this, create_graph=True)
+                output = (thetas[:, 1:] * inputv_this).sum(1, True)
+                output = output + thetas[:, :1]
 
                 loss = criterion(output, target_this)
-                loss = loss + (grads**2).sum()
+                loss = loss + self.tuningp * (grads**2).mean(0).sum()
 
                 np_loss = loss.data.item()
                 if np.isnan(np_loss):
@@ -347,6 +357,9 @@ n_train = x_train.shape[0] - n_test
     def score(self, x_test, y_test):
         if len(y_test.shape) == 1:
             y_test = y_test[:, None]
+
+        if self.scale_data:
+            x_test = self.scaler.transform(x_test)
 
         with torch.no_grad():
             self.neural_net.eval()
@@ -380,6 +393,9 @@ n_train = x_train.shape[0] - n_test
             return -1 * np.average(loss_vals, weights=batch_sizes)
 
     def predict(self, x_pred):
+        if self.scale_data:
+            x_pred = self.scaler.transform(x_pred)
+
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(x_pred)
@@ -444,7 +460,7 @@ n_train = x_train.shape[0] - n_test
                 self.llayers = nn.ModuleList(llayers)
                 self.normllayers = nn.ModuleList(normllayers)
 
-                self.fc_last = nn.Linear(next_input_l_size, x_dim)
+                self.fc_last = nn.Linear(next_input_l_size, x_dim + 1)
                 self._initialize_layer(self.fc_last)
                 self.num_layers = num_layers
 
@@ -504,3 +520,32 @@ n_train = x_train.shape[0] - n_test
                           "but is not currently available and will "
                           "be disabled "
                           "(renable with estimator move_to_gpu)")
+
+    def get_thetas(self, x_pred, original_scale):
+        if self.scale_data:
+            x_pred = self.scaler.transform(x_pred)
+
+        with torch.no_grad():
+            self.neural_net.eval()
+            inputv = _np_to_tensor(x_pred)
+
+            if self.gpu:
+                inputv = inputv.cuda()
+
+            thetas = self.neural_net(inputv)
+
+            if original_scale:
+                return thetas
+            elif not self.scale_data:
+                raise ValueError('Must set original_scale to True' +
+                'since you did not scale your data')
+            else:
+                scale = _np_to_tensor(self.scaler.scale_)
+                mean = _np_to_tensor(self.scaler.mean_)
+                if self.gpu:
+                    scale = scale.cuda()
+                    mean = mean.cuda()
+                thetas[:, 1:] /= scale
+                thetas[:, :1] *= (mean * thetas[:, 1:]).sum(1, True)
+
+                return thetas

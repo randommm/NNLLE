@@ -14,14 +14,10 @@
 #along with this program.    If not, see <http://www.gnu.org/licenses/>.
 #----------------------------------------------------------------------
 
-import torch
-import torch.nn.functional as F
-
-import numpy as np
-import scipy.stats as stats
-
 from nnlocallinear import NNPredict
-import os
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
 from generate_data import generate_data
 
@@ -42,6 +38,7 @@ if __name__ == '__main__':
     num_layers=3,
     gpu=True,
     dataloader_workers=0,
+    tuningp=0.5,
     )
     nnlocallinear_obj.fit(x_train, y_train)
 
@@ -50,3 +47,25 @@ if __name__ == '__main__':
     print("Risk on test (locallinearr):",
           ((nnlocallinear_obj.predict(x_test) - y_test)**2).mean()
          )
+    print(nnlocallinear_obj.get_thetas(x_test, True))
+    print(nnlocallinear_obj.get_thetas(x_test, False))
+
+
+    nnlocallinear_obj = NNPredict(
+    verbose=2,
+    es=True,
+    hidden_size=100,
+    num_layers=3,
+    gpu=True,
+    dataloader_workers=0,
+    tuningp=0.5,
+    scale_data=False,
+    )
+    nnlocallinear_obj.fit(x_train, y_train)
+
+    nnlocallinear_obj.verbose = 0
+    print("Risk on test (locallinearr):", - nnlocallinear_obj.score(x_test, y_test))
+    print("Risk on test (locallinearr):",
+          ((nnlocallinear_obj.predict(x_test) - y_test)**2).mean()
+         )
+    print(nnlocallinear_obj.get_thetas(x_test, True))
