@@ -27,15 +27,21 @@ import itertools
 s_tuningp = [0.0, 0.01, 0.1, 0.5]
 s_scale_data = [True, False]
 s_complexity = [10, 100, 1000]
+s_penalize_theta0 = [True, False]
 
-prods = itertools.product(s_tuningp, s_scale_data, s_complexity)
+prods = itertools.product(s_tuningp, s_scale_data, s_complexity,
+    s_penalize_theta0)
 prods = list(prods)
 
 df = pd.DataFrame(columns=[
-    'tuningp', 'scale_data', 'complexity', 'mse_val', 'mse_test'
+    'tuningp', 'scale_data', 'complexity', 'penalize_theta0',
+    'mse_val', 'mse_test',
+
 ])
 
-for tuningp, scale_data, complexity in prods:
+for tuningp, scale_data, complexity, penalize_theta0 in prods:
+    if penalize_theta0 and not tuningp:
+        continue
     np.random.seed(10)
 
     n_train = 9_000
@@ -59,6 +65,7 @@ for tuningp, scale_data, complexity in prods:
     dataloader_workers=1,
     tuningp=tuningp,
     scale_data=scale_data,
+    penalize_theta0=penalize_theta0,
     )
     nnlocallinear_obj.fit(x_train, y_train)
 
@@ -77,7 +84,7 @@ for tuningp, scale_data, complexity in prods:
     # print(nnlocallinear_obj.get_thetas(x_test, True))
     # print(nnlocallinear_obj.get_thetas(x_test, False))
 
-    df.loc[len(df)] = (tuningp, scale_data, complexity, mse_val,
-        mse_test)
+    df.loc[len(df)] = (tuningp, scale_data, complexity, penalize_theta0,
+        mse_val, mse_test)
     print(df)
     df.to_csv('results.csv')

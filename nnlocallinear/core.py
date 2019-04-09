@@ -114,6 +114,7 @@ n_train = x_train.shape[0] - n_test
 
                  tuningp=0,
                  scale_data=True,
+                 penalize_theta0=True,
                  ):
 
         for prop in dir():
@@ -331,7 +332,9 @@ n_train = x_train.shape[0] - n_test
                 loss = criterion(output, target_this)
 
                 if self.tuningp:
-                    grads, = torch.autograd.grad(thetas[:, 1:].sum(),
+                    pen = int(not self.penalize_theta0)
+                    grads, = torch.autograd.grad(
+                        thetas[:, pen:].sum(),
                         inputv_this, create_graph=True)
                     loss2 = self.tuningp * (grads**2).mean(0).sum()
                     loss = loss + loss2
