@@ -91,7 +91,7 @@ n_train = x_train.shape[0] - n_test
     """
     def __init__(self,
                  nn_weight_decay=0,
-                 num_layers=10,
+                 num_layers=3,
                  hidden_size=100,
                  convolutional=False,
 
