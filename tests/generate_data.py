@@ -19,9 +19,6 @@ import torch.nn.functional as F
 import numpy as np
 import scipy.stats as stats
 
-#Comment for non-deterministic results
-np.random.seed(10)
-
 x_dim = 50
 
 beta = stats.norm.rvs(size=x_dim, scale=0.4)

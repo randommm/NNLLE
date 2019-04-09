@@ -326,13 +326,15 @@ n_train = x_train.shape[0] - n_test
 
                 optimizer.zero_grad()
                 thetas = self.neural_net(inputv_this)
-                grads, = torch.autograd.grad(thetas[:, 1:].sum(),
-                    inputv_this, create_graph=True)
                 output = (thetas[:, 1:] * inputv_this).sum(1, True)
                 output = output + thetas[:, :1]
-
                 loss = criterion(output, target_this)
-                loss = loss + self.tuningp * (grads**2).mean(0).sum()
+
+                if self.tuningp:
+                    grads, = torch.autograd.grad(thetas[:, 1:].sum(),
+                        inputv_this, create_graph=True)
+                    loss2 = self.tuningp * (grads**2).mean(0).sum()
+                    loss = loss + loss2
 
                 np_loss = loss.data.item()
                 if np.isnan(np_loss):
