@@ -27,6 +27,7 @@ import itertools
 from scipy import stats
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ShuffleSplit
+from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 from sklearn.preprocessing import StandardScaler
 import collections
@@ -559,3 +560,59 @@ n_train = x_train.shape[0] - n_test
                 thetas[:, :1] *= (mean * thetas[:, 1:]).sum(1, True)
 
                 return thetas
+
+
+
+
+
+class LLE(BaseEstimator):
+
+    def __init__(self):
+
+        for prop in dir():
+            if prop != "self":
+                setattr(self, prop, locals()[prop])
+
+    def fit(self, x_train, y_train):
+
+        self.x_train = np.hstack((np.ones((len(x_train), 1)), x_train))
+        self.y_train = y_train
+
+        return self
+
+    def predict(self, x, g, save_thetas=False):
+
+        x = np.hstack((np.ones((len(x), 1)), x))
+
+        pred = np.empty(len(x))
+
+        ed = np.exp(- euclidean_distances(self.x_train, x) / g)
+
+        if save_thetas:
+
+            thetas = np.empty((len(x), x.shape[1]))
+
+        for i in range(x.shape[0]):
+
+            par = self.get_thetas(ed[:, i])
+
+            pred[i] = np.inner(x[i], par)
+
+            if save_thetas:
+
+                thetas[i, :] = par
+
+        if not save_thetas:
+
+            return pred
+
+        return pred, thetas
+
+    def get_thetas(self, k):
+
+        A = self.x_train * np.sqrt(k[:, np.newaxis])
+        B = self.y_train.reshape(-1) * np.sqrt(k)
+
+        thetas = np.linalg.lstsq(A, B, rcond=None)[0]
+
+        return thetas
