@@ -557,7 +557,7 @@ n_train = x_train.shape[0] - n_test
                     scale = scale.cuda()
                     mean = mean.cuda()
                 thetas[:, 1:] /= scale
-                thetas[:, :1] *= (mean * thetas[:, 1:]).sum(1, True)
+                thetas[:, :1] -= (mean * thetas[:, 1:]).sum(1, True)
 
                 return thetas
 
