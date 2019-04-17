@@ -412,29 +412,6 @@ n_train = x_train.shape[0] - n_test
 
             return output_pred.data.cpu().numpy()
 
-    def _special_predict(self, x_pred):
-        if not self.scale_data:
-            raise get_thetas(
-                '_special_predict only allowed with scale_data')
-
-        thetas = self.get_thetas(x_pred, True)
-        output_pred = (thetas[:, 1:] * x_pred).sum(1, keepdims=True)
-        output_pred = output_pred + thetas[:, :1]
-
-        return output_pred
-
-    def _special_predict2(self, x_pred):
-        if not self.scale_data:
-            raise get_thetas(
-                '_special_predict only allowed with scale_data')
-
-        thetas = self.get_thetas(x_pred, False)
-        x_pred = self.scaler.transform(x_pred)
-        output_pred = (thetas[:, 1:] * x_pred).sum(1, keepdims=True)
-        output_pred = output_pred + thetas[:, :1]
-
-        return output_pred
-
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
