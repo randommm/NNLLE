@@ -31,6 +31,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 from sklearn.preprocessing import StandardScaler
 import collections
+import warnings
 
 def _np_to_tensor(arr):
     arr = np.array(arr, dtype='f4')
@@ -44,21 +45,17 @@ class NNPredict(BaseEstimator):
     [0, 1], however, the class implements estimators to automatically
     transform user inputted data to [0, 1]. See parameter `transform`
     below.
-
     Parameters
     ----------
     ncomponents : integer
         Maximum number of components of the Fourier series
         expansion.
-
     nn_weight_decay : object
         Mulplier for penalizaing the size of neural network weights. This penalization occurs for training only (does not affect score estimator nor validation of early stopping).
-
     num_layers : integer
         Number of hidden layers for the neural network. If set to 0, then it degenerates to linear regression.
     hidden_size : integer
         Multiplier for the size of the hidden layers of the neural network. If set to 1, then each of them will have ncomponents components. If set to 2, then 2 * ncomponents components, and so on.
-
     es : bool
         If true, then will split the training set into training and validation and calculate the validation internally on each epoch and check if the validation loss increases or not.
     es_validation_set_size : float, int
@@ -68,10 +65,8 @@ n_train = x_train.shape[0] - n_test
         Amount of epochs to try to decrease the validation loss before giving up and stoping training.
     es_splitter_random_state : float
         Random state to split the dataset into training and validation.
-
     nepoch : integer
         Number of epochs to run. Ignored if es == True.
-
     batch_initial : integer
         Initial batch size.
     batch_step_multiplier : float
@@ -80,7 +75,6 @@ n_train = x_train.shape[0] - n_test
         See batch_inital.
     batch_max_size : float
         See batch_inital.
-
     batch_test_size : integer
         Size of the batch for validation and score estimators.
         Does not affect training efficiency, usefull when there's
@@ -555,7 +549,7 @@ n_train = x_train.shape[0] - n_test
                           "be disabled "
                           "(renable with estimator move_to_gpu)")
 
-    def get_thetas(self, x_pred, original_scale):
+    def get_thetas(self, x_pred, net_scale=False):
         if self.scale_data:
             x_pred = self.scaler.transform(x_pred)
 
@@ -568,14 +562,15 @@ n_train = x_train.shape[0] - n_test
 
             thetas = self.neural_net(inputv)
 
-            if original_scale:
+            if net_scale:
                 return thetas.data.cpu().numpy()
             elif not self.scale_data:
-                raise ValueError('Must set original_scale to True' +
-                'since you did not scale your data')
+                warnings.warn('Net is not using any scaler')
+                return thetas.data.cpu().numpy()
             else:
                 scale = _np_to_tensor(self.scaler.scale_)
                 mean = _np_to_tensor(self.scaler.mean_)
+
                 if self.gpu:
                     scale = scale.cuda()
                     mean = mean.cuda()
