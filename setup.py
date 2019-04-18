@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 #----------------------------------------------------------------------
-# Copyright 2018 Marco Inacio <pythonpackages@marcoinacio.com>
+# Copyright 2018-2019
+# Marco Inacio <pythonpackages@marcoinacio.com>,
+# Victor Coscrato <vcoscrato@gmail.com>
 #
 #This program is free software: you can redistribute it and/or modify
 #it under the terms of the GNU General Public License as published by
@@ -25,7 +27,7 @@ setup(name='nnlocallinear',
       version='0.0.1',
       description='Conformal prediction using '
                   'neural networks',
-      author='Marco Inacio',
+      author='Marco Inacio, Victor Coscrato',
       author_email='pythonpackages@marcoinacio.com',
       packages=['nnlocallinear'],
       keywords = ['neural networks', 'local linear regression'],

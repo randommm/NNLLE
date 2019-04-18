@@ -27,20 +27,22 @@ import itertools
 s_tuningp = [0.0, 0.01, 0.1, 0.5]
 s_scale_data = [True, False]
 s_complexity = [10, 100, 1000]
-s_penalize_theta0 = [True, False]
+s_penalize_theta0v = [True, False]
+s_varying_theta0 = [True, False]
+s_fixed_theta0 = [True, False]
 
 prods = itertools.product(s_tuningp, s_scale_data, s_complexity,
-    s_penalize_theta0)
+    s_penalize_theta0v, s_varying_theta0, s_fixed_theta0)
 prods = list(prods)
 
 df = pd.DataFrame(columns=[
-    'tuningp', 'scale_data', 'complexity', 'penalize_theta0',
-    'mse_val', 'mse_test',
+    'tuningp', 'scale_data', 'complexity', 'penalize_theta0v',
+    'varying_theta0', 'fixed_theta0', 'mse_val', 'mse_test',
 
 ])
 
-for tuningp, scale_data, complexity, penalize_theta0 in prods:
-    if penalize_theta0 and not tuningp:
+for tuningp, scale_data, complexity, penalize_theta0v, varying_theta0, fixed_theta0 in prods:
+    if penalize_theta0v and not tuningp:
         continue
     np.random.seed(10)
 
@@ -57,6 +59,7 @@ for tuningp, scale_data, complexity, penalize_theta0 in prods:
     # print(max(y_train))
 
     nnlocallinear_obj = NNPredict(
+    es_give_up_after_nepochs=30,
     verbose=1,
     es=True,
     hidden_size=complexity,
@@ -65,7 +68,9 @@ for tuningp, scale_data, complexity, penalize_theta0 in prods:
     dataloader_workers=1,
     tuningp=tuningp,
     scale_data=scale_data,
-    penalize_theta0=penalize_theta0,
+    penalize_theta0v=penalize_theta0v,
+    varying_theta0=varying_theta0,
+    fixed_theta0=fixed_theta0
     )
     nnlocallinear_obj.fit(x_train, y_train)
 
@@ -86,17 +91,19 @@ for tuningp, scale_data, complexity, penalize_theta0 in prods:
         print("predict on test (locallinearr):",
               (nnlocallinear_obj.predict(x_test)).mean()
              )
-        print("special predict on test (locallinearr):",
-              (nnlocallinear_obj._special_predict(x_test)).mean()
-             )
-        print("special predict 2 on test (locallinearr):",
-              (nnlocallinear_obj._special_predict2(x_test)).mean()
-             )
+        # print("special predict on test (locallinearr):",
+              # (nnlocallinear_obj._special_predict(x_test)).mean()
+             # )
+        # print("special predict 2 on test (locallinearr):",
+              # (nnlocallinear_obj._special_predict2(x_test)).mean()
+             # )
 
-    # print(nnlocallinear_obj.get_thetas(x_test, True))
-    # print(nnlocallinear_obj.get_thetas(x_test, False))
+    if scale_data:
+        print(nnlocallinear_obj.get_thetas(x_test, True)[:2])
+    print(nnlocallinear_obj.get_thetas(x_test, False)[:2])
 
-    df.loc[len(df)] = (tuningp, scale_data, complexity, penalize_theta0,
+    df.loc[len(df)] = (tuningp, scale_data, complexity,
+        penalize_theta0v, varying_theta0, fixed_theta0,
         mse_val, mse_test)
     print(df)
     df.to_csv('results.csv')

@@ -31,7 +31,6 @@ from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 from sklearn.preprocessing import StandardScaler
 import collections
-import warnings
 
 def _np_to_tensor(arr):
     arr = np.array(arr, dtype='f4')
@@ -109,7 +108,9 @@ n_train = x_train.shape[0] - n_test
 
                  tuningp=0,
                  scale_data=True,
-                 penalize_theta0=True,
+                 penalize_theta0v=True,
+                 varying_theta0=True,
+                 fixed_theta0=True,
                  ):
 
         for prop in dir():
@@ -315,22 +316,28 @@ n_train = x_train.shape[0] - n_test
                     inputv_this = inputv_this.cuda(non_blocking=True)
                     target_this = target_this.cuda(non_blocking=True)
 
-                inputv_this = torch.tensor(inputv_this,
-                    requires_grad=True)
+                inputv_this = inputv_this.requires_grad_(True)
 
                 batch_actual_size = inputv_this.shape[0]
 
                 optimizer.zero_grad()
-                thetas = self.neural_net(inputv_this)
-                output = (thetas[:, 1:] * inputv_this).sum(1, True)
-                output = output + thetas[:, :1]
+                theta0v, theta0f, thetas = self.neural_net(inputv_this)
+                output = (thetas * inputv_this).sum(1, True)
+
+                if theta0v is not None:
+                    output = output + theta0v
+                if theta0f is not None:
+                    output = output + theta0f
+
                 loss = criterion(output, target_this)
 
                 if self.tuningp:
-                    pen = int(not self.penalize_theta0)
+                    pen = int(not self.penalize_theta0v)
+                    to_pen = thetas.sum()
+                    if self.penalize_theta0v and theta0v is not None:
+                        to_pen = to_pen + theta0v.sum()
                     grads, = torch.autograd.grad(
-                        thetas[:, pen:].sum(),
-                        inputv_this, create_graph=True)
+                        to_pen, inputv_this, create_graph=True)
                     loss2 = self.tuningp * (grads**2).mean(0).sum()
                     loss = loss + loss2
 
@@ -383,9 +390,12 @@ n_train = x_train.shape[0] - n_test
                     target_this = target_this.cuda(non_blocking=True)
 
                 batch_actual_size = inputv_this.shape[0]
-                thetas = self.neural_net(inputv_this)
-                output = (thetas[:, 1:] * inputv_this).sum(1, True)
-                output = output + thetas[:, :1]
+                theta0v, theta0f, thetas = self.neural_net(inputv_this)
+                output = (thetas * inputv_this).sum(1, True)
+                if theta0v is not None:
+                    output = output + theta0v
+                if theta0f is not None:
+                    output = output + theta0f
 
                 criterion = nn.MSELoss()
                 loss = criterion(output, target_this)
@@ -406,22 +416,31 @@ n_train = x_train.shape[0] - n_test
             if self.gpu:
                 inputv = inputv.cuda()
 
-            thetas = self.neural_net(inputv)
-            output_pred = (thetas[:, 1:] * inputv).sum(1, True)
-            output_pred = output_pred + thetas[:, :1]
+            theta0v, theta0f, thetas = self.neural_net(inputv)
+            output_pred = (thetas * inputv).sum(1, True)
+            if theta0v is not None:
+                output_pred = output_pred + theta0v
+            if theta0f is not None:
+                output_pred = output_pred + theta0f
 
             return output_pred.data.cpu().numpy()
 
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
-                         hidden_size, convolutional):
+                         hidden_size, convolutional,
+                         varying_theta0, fixed_theta0):
                 super(NeuralNet, self).__init__()
 
                 output_hl_size = int(hidden_size)
                 self.dropl = nn.Dropout(p=0.5)
                 self.convolutional = convolutional
+                self.varying_theta0 = varying_theta0
+                self.fixed_theta0 = fixed_theta0
                 next_input_l_size = x_dim
+
+                if self.fixed_theta0:
+                    self.theta0f = nn.Parameter(torch.FloatTensor([.0]))
 
                 if self.convolutional:
                     next_input_l_size = 1
@@ -465,9 +484,11 @@ n_train = x_train.shape[0] - n_test
                 self.llayers = nn.ModuleList(llayers)
                 self.normllayers = nn.ModuleList(normllayers)
 
-                self.fc_last = nn.Linear(next_input_l_size, x_dim + 1)
+                self.fc_last = nn.Linear(next_input_l_size,
+                    x_dim + varying_theta0)
                 self._initialize_layer(self.fc_last)
                 self.num_layers = num_layers
+                self.elu = nn.ELU()
 
             def forward(self, x):
                 if self.convolutional:
@@ -476,18 +497,30 @@ n_train = x_train.shape[0] - n_test
                         fc = self.clayers[i]
                         fpo = self.polayers[i]
                         fcn = self.normclayers[i]
-                        x = fcn(F.elu(fc(x)))
+                        x = fcn(self.elu(fc(x)))
                         x = fpo(x)
                     x = x.view(x.size(0), -1)
 
                 for i in range(self.num_layers):
                     fc = self.llayers[i]
                     fcn = self.normllayers[i]
-                    x = fcn(F.elu(fc(x)))
+                    x = fcn(self.elu(fc(x)))
                     x = self.dropl(x)
-                x = self.fc_last(x)
 
-                return x
+                thetas = self.fc_last(x)
+                if self.varying_theta0:
+                    theta0v = thetas[:, :1]
+                    thetas = thetas[:, 1:]
+                else:
+                    theta0v = None
+                    thetas = thetas
+
+                if self.fixed_theta0:
+                    theta0f = self.theta0f
+                else:
+                    theta0f = None
+
+                return theta0v, theta0f, thetas
 
             def _initialize_layer(self, layer):
                 nn.init.constant_(layer.bias, 0)
@@ -496,7 +529,9 @@ n_train = x_train.shape[0] - n_test
 
         self.neural_net = NeuralNet(self.x_dim, self.y_dim,
                                     self.num_layers, self.hidden_size,
-                                    self.convolutional)
+                                    self.convolutional,
+                                    self.varying_theta0,
+                                    self.fixed_theta0)
 
     def __getstate__(self):
         d = self.__dict__.copy()
@@ -526,7 +561,7 @@ n_train = x_train.shape[0] - n_test
                           "be disabled "
                           "(renable with estimator move_to_gpu)")
 
-    def get_thetas(self, x_pred, net_scale=False):
+    def get_thetas(self, x_pred, net_scale):
         if self.scale_data:
             x_pred = self.scaler.transform(x_pred)
 
@@ -537,13 +572,18 @@ n_train = x_train.shape[0] - n_test
             if self.gpu:
                 inputv = inputv.cuda()
 
-            thetas = self.neural_net(inputv)
+            theta0v, theta0f, thetas = self.neural_net(inputv)
 
             if net_scale:
-                return thetas.data.cpu().numpy()
+                if theta0v is not None:
+                    theta0v = theta0v.data.cpu().numpy()
+                if theta0f is not None:
+                    theta0f = theta0f.data.cpu().numpy()
+                thetas = thetas.data.cpu().numpy()
+                return theta0v, theta0f, thetas
             elif not self.scale_data:
-                warnings.warn('Net is not using any scaler')
-                return thetas.data.cpu().numpy()
+                raise ValueError('Must set scale_data to True' +
+                'since you did not scale your data')
             else:
                 scale = _np_to_tensor(self.scaler.scale_)
                 mean = _np_to_tensor(self.scaler.mean_)
@@ -551,13 +591,17 @@ n_train = x_train.shape[0] - n_test
                 if self.gpu:
                     scale = scale.cuda()
                     mean = mean.cuda()
-                thetas[:, 1:] /= scale
-                thetas[:, :1] -= (mean * thetas[:, 1:]).sum(1, True)
+                thetas = thetas / scale
 
-                return thetas.data.cpu().numpy()
+                if theta0v is None:
+                    theta0v = 0
+                theta0v = - (mean * thetas).sum(1, True) + theta0v
 
-
-
+                theta0v = theta0v.data.cpu().numpy()
+                if theta0f is not None:
+                    theta0f = theta0f.data.cpu().numpy()
+                thetas = thetas.data.cpu().numpy()
+                return theta0v, theta0f, thetas
 
 
 class LLE(BaseEstimator):
