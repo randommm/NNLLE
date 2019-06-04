@@ -106,11 +106,12 @@ n_train = x_train.shape[0] - n_test
                  gpu=True,
                  verbose=1,
 
-                 tuningp=0,
                  scale_data=True,
-                 penalize_theta0v=True,
                  varying_theta0=True,
                  fixed_theta0=True,
+
+                 penalization_thetas=0,
+                 penalization_variable_theta0=0,
                  ):
 
         for prop in dir():
@@ -331,15 +332,30 @@ n_train = x_train.shape[0] - n_test
 
                 loss = criterion(output, target_this)
 
-                if self.tuningp:
-                    pen = int(not self.penalize_theta0v)
-                    to_pen = thetas.sum()
-                    if self.penalize_theta0v and theta0v is not None:
-                        to_pen = to_pen + theta0v.sum()
+
+                # Derivative penalization start
+                to_pen = None
+                if self.penalization_thetas:
+                    to_pen = self.penalization_thetas
+                    to_pen = to_pen**.5 * thetas.sum()
+
+                if (self.penalization_variable_theta0
+                    and theta0v is not None):
+                    to_pen2 = self.penalization_variable_theta0
+                    to_pen2 = to_pen2**.5 * theta0v.sum()
+
+                    if self.penalization_thetas:
+                        to_pen = to_pen + to_pen2
+                    else:
+                        to_pen = to_pen2
+
+                if to_pen is not None:
                     grads, = torch.autograd.grad(
                         to_pen, inputv_this, create_graph=True)
-                    loss2 = self.tuningp * (grads**2).mean(0).sum()
+
+                    loss2 = (grads**2).mean(0).sum()
                     loss = loss + loss2
+
 
                 np_loss = loss.data.item()
                 if np.isnan(np_loss):

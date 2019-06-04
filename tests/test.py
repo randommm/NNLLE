@@ -24,26 +24,27 @@ from generate_data import generate_data
 import pandas as pd
 import itertools
 
-s_tuningp = [0.0, 0.01, 0.1, 0.5]
+s_penalization_thetas = [0.0, 0.01, 0.1, 0.5]
+s_penalization_variable_theta0 = [0.0, 0.01, 0.1, 0.5]
 s_scale_data = [True, False]
 s_complexity = [10, 100, 1000]
-s_penalize_theta0v = [True, False]
 s_varying_theta0 = [True, False]
 s_fixed_theta0 = [True, False]
 
-prods = itertools.product(s_tuningp, s_scale_data, s_complexity,
-    s_penalize_theta0v, s_varying_theta0, s_fixed_theta0)
+prods = itertools.product(s_penalization_thetas,
+    s_penalization_variable_theta0, s_scale_data, s_complexity,
+    s_varying_theta0, s_fixed_theta0)
 prods = list(prods)
+prods = np.random.permutation(np.array(prods, dtype=object))
 
 df = pd.DataFrame(columns=[
-    'tuningp', 'scale_data', 'complexity', 'penalize_theta0v',
+    'penalization_thetas', 'penalization_variable_theta0',
+    'scale_data', 'complexity',
     'varying_theta0', 'fixed_theta0', 'mse_val', 'mse_test',
 
 ])
 
-for tuningp, scale_data, complexity, penalize_theta0v, varying_theta0, fixed_theta0 in prods:
-    if penalize_theta0v and not tuningp:
-        continue
+for penalization_thetas, penalization_variable_theta0, scale_data, complexity, varying_theta0, fixed_theta0 in prods:
     np.random.seed(10)
 
     n_train = 9_000
@@ -66,11 +67,13 @@ for tuningp, scale_data, complexity, penalize_theta0v, varying_theta0, fixed_the
     num_layers=3,
     gpu=True,
     dataloader_workers=1,
-    tuningp=tuningp,
+
     scale_data=scale_data,
-    penalize_theta0v=penalize_theta0v,
     varying_theta0=varying_theta0,
-    fixed_theta0=fixed_theta0
+    fixed_theta0=fixed_theta0,
+
+    penalization_thetas=penalization_thetas,
+    penalization_variable_theta0= penalization_variable_theta0,
     )
     nnlocallinear_obj.fit(x_train, y_train)
 
@@ -99,11 +102,12 @@ for tuningp, scale_data, complexity, penalize_theta0v, varying_theta0, fixed_the
              # )
 
     if scale_data:
-        print(nnlocallinear_obj.get_thetas(x_test, True)[:2])
-    print(nnlocallinear_obj.get_thetas(x_test, False)[:2])
+        print(nnlocallinear_obj.get_thetas(x_test, False)[:2])
+    print(nnlocallinear_obj.get_thetas(x_test, True)[:2])
 
-    df.loc[len(df)] = (tuningp, scale_data, complexity,
-        penalize_theta0v, varying_theta0, fixed_theta0,
-        mse_val, mse_test)
+    df.loc[len(df)] = (penalization_thetas,
+        penalization_variable_theta0, scale_data, complexity,
+        varying_theta0, fixed_theta0, mse_val, mse_test)
+    df = df.sort_values(list(df.columns))
     print(df)
     df.to_csv('results.csv')
