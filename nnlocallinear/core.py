@@ -37,13 +37,9 @@ def _np_to_tensor(arr):
     arr = torch.from_numpy(arr)
     return arr
 
-class NNPredict(BaseEstimator):
+class NLS(BaseEstimator):
     """
-    Estimate univariate density using Bayesian Fourier Series.
-    This estimator only works with data the lives in
-    [0, 1], however, the class implements estimators to automatically
-    transform user inputted data to [0, 1]. See parameter `transform`
-    below.
+    Estimate a neuro local smoother (NLS).
     Parameters
     ----------
     ncomponents : integer
@@ -620,10 +616,15 @@ n_train = x_train.shape[0] - n_test
                 return theta0v, theta0f, thetas
 
 
-class LLE(BaseEstimator):
-
-    def __init__(self):
-
+class LLS(BaseEstimator):
+    """
+    Fit a local linear smoother using a gaussian kernel
+    Parameters
+    ----------
+    kernel_var : float
+        variation parameter for the gaussian kernel.
+    """
+    def __init__(self, kernel_var=1):
         for prop in dir():
             if prop != "self":
                 setattr(self, prop, locals()[prop])
@@ -635,39 +636,36 @@ class LLE(BaseEstimator):
 
         return self
 
-    def predict(self, x, g, save_thetas=False):
+    def predict(self, x, save_thetas=False):
 
         x = np.hstack((np.ones((len(x), 1)), x))
-
         pred = np.empty(len(x))
-
-        ed = np.exp(- euclidean_distances(self.x_train, x) / g)
-
+        ed = np.exp(- euclidean_distances(self.x_train, x) / self.kernel_var)
         if save_thetas:
-
             thetas = np.empty((len(x), x.shape[1]))
-
         for i in range(x.shape[0]):
-
-            par = self.get_thetas(ed[:, i])
-
+            par = self.__get_thetas_single(ed[:, i])
             pred[i] = np.inner(x[i], par)
-
             if save_thetas:
-
                 thetas[i, :] = par
-
         if not save_thetas:
-
             return pred
 
         return pred, thetas
 
-    def get_thetas(self, k):
+    def __get_thetas_single(self, k):
 
         A = self.x_train * np.sqrt(k[:, np.newaxis])
-        B = self.y_train.reshape(-1) * np.sqrt(k)
+        B = self.y_train * np.sqrt(k)
 
         thetas = np.linalg.lstsq(A, B, rcond=None)[0]
 
         return thetas
+
+    def score(self, x, y):
+
+        preds = self.predict(x, save_thetas=False)
+        score = np.mean(np.square(y - preds))
+
+        return score
+
