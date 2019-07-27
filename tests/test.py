@@ -90,16 +90,19 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
           ((nnlocallinear_obj.predict(x_test) - y_test)**2).mean()
          )
 
-    if scale_data:
-        print("predict on test (locallinearr):",
-              (nnlocallinear_obj.predict(x_test)).mean()
-             )
-        # print("special predict on test (locallinearr):",
-              # (nnlocallinear_obj._special_predict(x_test)).mean()
-             # )
-        # print("special predict 2 on test (locallinearr):",
-              # (nnlocallinear_obj._special_predict2(x_test)).mean()
-             # )
+    print("predict on test (locallinearr):",
+          (nnlocallinear_obj.predict(x_test)).mean()
+         )
+    preds, grads = nnlocallinear_obj.predict(x_test, True)
+    print("predict on test with grad (locallinearr):",
+          preds.mean(), " ", grads.mean(),
+         )
+    # print("special predict on test (locallinearr):",
+          # (nnlocallinear_obj._special_predict(x_test)).mean()
+         # )
+    # print("special predict 2 on test (locallinearr):",
+          # (nnlocallinear_obj._special_predict2(x_test)).mean()
+         # )
 
     if scale_data:
         print(nnlocallinear_obj.get_thetas(x_test, False)[:2])

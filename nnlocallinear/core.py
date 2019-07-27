@@ -355,6 +355,7 @@ n_train = x_train.shape[0] - n_test
 
                     loss2 = (grads**2).mean(0).sum()
                     loss = loss + loss2
+                # Derivative penalization end
 
 
                 np_loss = loss.data.item()
@@ -421,16 +422,19 @@ n_train = x_train.shape[0] - n_test
 
             return -1 * np.average(loss_vals, weights=batch_sizes)
 
-    def predict(self, x_pred):
+    def predict(self, x_pred, pen_out=False):
         if self.scale_data:
             x_pred = self.scaler.transform(x_pred)
 
-        with torch.no_grad():
+        with torch.autograd.set_grad_enabled(pen_out):
             self.neural_net.eval()
             inputv = _np_to_tensor(x_pred)
 
             if self.gpu:
                 inputv = inputv.cuda()
+
+            if pen_out:
+                inputv = inputv.requires_grad_(True)
 
             theta0v, theta0f, thetas = self.neural_net(inputv)
             output_pred = (thetas * inputv).sum(1, True)
@@ -438,6 +442,32 @@ n_train = x_train.shape[0] - n_test
                 output_pred = output_pred + theta0v
             if theta0f is not None:
                 output_pred = output_pred + theta0f
+
+            # Derivative penalization start
+            if pen_out:
+                to_pen = None
+                if self.penalization_thetas:
+                    to_pen = self.penalization_thetas
+                    to_pen = to_pen**.5 * thetas.sum()
+
+                if (self.penalization_variable_theta0
+                    and theta0v is not None):
+                    to_pen2 = self.penalization_variable_theta0
+                    to_pen2 = to_pen2**.5 * theta0v.sum()
+
+                    if self.penalization_thetas:
+                        to_pen = to_pen + to_pen2
+                    else:
+                        to_pen = to_pen2
+
+                if to_pen is not None:
+                    grads, = torch.autograd.grad(
+                        to_pen, inputv, create_graph=True)
+                    grads = grads.data.cpu().numpy()
+                else:
+                    grads = None
+                return output_pred.data.cpu().numpy(), grads
+            # Derivative penalization end
 
             return output_pred.data.cpu().numpy()
 
