@@ -15,7 +15,7 @@
 #----------------------------------------------------------------------
 
 import numpy as np
-from nnlocallinear import NNPredict
+from nnlocallinear import NLS
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -59,7 +59,7 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
     # print(min(y_train))
     # print(max(y_train))
 
-    nnlocallinear_obj = NNPredict(
+    nnlocallinear_obj = NLS(
     es_give_up_after_nepochs=30,
     verbose=1,
     es=True,
@@ -93,10 +93,12 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
     print("predict on test (locallinearr):",
           (nnlocallinear_obj.predict(x_test)).mean()
          )
-    preds, grads = nnlocallinear_obj.predict(x_test, True)
+    preds, grads1, grads2 = nnlocallinear_obj.predict(x_test, True)
     print("predict on test with grad (locallinearr):",
-          preds.mean(), " ", grads.mean(),
+          preds.mean(), " ", grads1.mean(),
+          (grads2 if grads2 is not None else None)
          )
+    dddf
     # print("special predict on test (locallinearr):",
           # (nnlocallinear_obj._special_predict(x_test)).mean()
          # )

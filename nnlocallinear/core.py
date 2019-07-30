@@ -37,6 +37,18 @@ def _np_to_tensor(arr):
     arr = torch.from_numpy(arr)
     return arr
 
+class IntegralOfSquare(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, i):
+        result = i ** 2
+        ctx.save_for_backward(result)
+        return i # dummy value
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_tensors
+        return grad_output * result
+
 class NLS(BaseEstimator):
     """
     Estimate a neuro local smoother (NLS).
@@ -331,14 +343,15 @@ n_train = x_train.shape[0] - n_test
 
                 # Derivative penalization start
                 to_pen = None
+                intofsq = IntegralOfSquare.apply
                 if self.penalization_thetas:
                     to_pen = self.penalization_thetas
-                    to_pen = to_pen**.5 * thetas.sum()
+                    to_pen = to_pen * intofsq(thetas).sum()
 
                 if (self.penalization_variable_theta0
                     and theta0v is not None):
                     to_pen2 = self.penalization_variable_theta0
-                    to_pen2 = to_pen2**.5 * theta0v.sum()
+                    to_pen2 = to_pen2 * intofsq(theta0v).sum()
 
                     if self.penalization_thetas:
                         to_pen = to_pen + to_pen2
@@ -349,7 +362,7 @@ n_train = x_train.shape[0] - n_test
                     grads, = torch.autograd.grad(
                         to_pen, inputv_this, create_graph=True)
 
-                    loss2 = (grads**2).mean(0).sum()
+                    loss2 = grads.mean(0).sum()
                     loss = loss + loss2
                 # Derivative penalization end
 
@@ -439,34 +452,28 @@ n_train = x_train.shape[0] - n_test
             if theta0f is not None:
                 output_pred = output_pred + theta0f
 
+            output_pred = output_pred.data.cpu().numpy()
+
             # Derivative penalization start
+            intofsq = IntegralOfSquare.apply
             if pen_out:
-                to_pen = None
-                if self.penalization_thetas:
-                    to_pen = self.penalization_thetas
-                    to_pen = to_pen**.5 * thetas.sum()
+                to_pen = intofsq(thetas).sum()
+                grads1, = torch.autograd.grad(
+                    to_pen, inputv, create_graph=True)
+                grads1 = grads1.data.cpu().numpy()
 
-                if (self.penalization_variable_theta0
-                    and theta0v is not None):
-                    to_pen2 = self.penalization_variable_theta0
-                    to_pen2 = to_pen2**.5 * theta0v.sum()
-
-                    if self.penalization_thetas:
-                        to_pen = to_pen + to_pen2
-                    else:
-                        to_pen = to_pen2
-
-                if to_pen is not None:
-                    grads, = torch.autograd.grad(
+                if theta0v is not None:
+                    to_pen = intofsq(theta0v).sum()
+                    grads2, = torch.autograd.grad(
                         to_pen, inputv, create_graph=True)
-                    grads = grads**2
-                    grads = grads.data.cpu().numpy()
+                    grads2 = grads2.data.cpu().numpy()
                 else:
-                    grads = None
-                return output_pred.data.cpu().numpy(), grads
+                    grads2 = None
+
+                return output_pred, grads1, grads2
             # Derivative penalization end
 
-            return output_pred.data.cpu().numpy()
+            return output_pred
 
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
