@@ -459,6 +459,7 @@ n_train = x_train.shape[0] - n_test
                 if to_pen is not None:
                     grads, = torch.autograd.grad(
                         to_pen, inputv, create_graph=True)
+                    grads = grads**2
                     grads = grads.data.cpu().numpy()
                 else:
                     grads = None
