@@ -330,19 +330,16 @@ n_train = x_train.shape[0] - n_test
 
                 # Derivative penalization start
                 if self.penalization_thetas:
-                    loss2 = torch.tensor(
-                        0.,
-                        dtype=thetas.dtype,
-                        device=thetas.device
-                    )
-                    loss2.requires_grad_(True)
                     for i in range(thetas.shape[1]):
                         grads_this, = torch.autograd.grad(
                             thetas[:, i].sum(), inputv_this,
                             create_graph=True,
                             )
-
-                        loss2 = loss2 + (grads_this**2).mean(0).sum()
+                        loss_this = (grads_this**2).mean(0).sum()
+                        if i:
+                            loss2 = loss2 + loss_this
+                        else:
+                            loss2 = loss_this
 
                     loss2 = loss2 * self.penalization_thetas
                     loss = loss + loss2
