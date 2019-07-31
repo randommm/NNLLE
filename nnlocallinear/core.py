@@ -488,6 +488,9 @@ n_train = x_train.shape[0] - n_test
 
                     grads2 = grads2 ** 2.
                     grads2 = grads2.cpu().numpy()
+                    
+                else:
+                    grads2 = None
 
                 return output_pred, grads1, grads2
             # Derivative penalization end
