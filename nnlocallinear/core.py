@@ -424,18 +424,38 @@ n_train = x_train.shape[0] - n_test
 
             return -1 * np.average(loss_vals, weights=batch_sizes)
 
-    def predict(self, x_pred, pen_out=False):
+    def predict(self, x_pred, grad_out=False):
+        """
+        Predict y.
+
+        Parameters
+        ----------
+        x_pred : array
+            Matrix of features
+        grad_out :
+            If True, then will output a tuple where the first element is
+            the predicted value of y, the second is a numpy array with
+            squared gradients of regarding the thetas of each variable,
+            and the third is squared gradients of regarding the thetas
+            of the varying theta0 (None if self.varying_theta0 is
+            False). Note that in case of the second element of the tuple
+            the array has shape (no_instances, no_features, no_features)
+            where the second dimension refers to denominator of the
+            derivative and the third dimension refers to the numerator
+            of the derivative). You can concatenate both with:
+            `np.concatenate((res[2][:,:,None], res[1]), 2)`
+        """
         if self.scale_data:
             x_pred = self.scaler.transform(x_pred)
 
-        with torch.autograd.set_grad_enabled(pen_out):
+        with torch.autograd.set_grad_enabled(grad_out):
             self.neural_net.eval()
             inputv = _np_to_tensor(x_pred)
 
             if self.gpu:
                 inputv = inputv.cuda()
 
-            if pen_out:
+            if grad_out:
                 inputv = inputv.requires_grad_(True)
 
             theta0v, theta0f, thetas = self.neural_net(inputv)
@@ -448,23 +468,22 @@ n_train = x_train.shape[0] - n_test
             output_pred = output_pred.data.cpu().numpy()
 
             # Derivative penalization start
-            if pen_out:
+            if grad_out:
                 if self.penalization_thetas:
-                    grads1 = torch.tensor(
-                        [],
-                        dtype=thetas.dtype,
-                        device=thetas.device
-                    )
                     for i in range(thetas.shape[1]):
                         grads_this, = torch.autograd.grad(
                             thetas[:, i].sum(), inputv,
                             retain_graph=True,
                             )
 
-                        grads1 = torch.cat((grads1, grads_this))
+                        grads_this = grads_this[:, :, None].cpu()
+                        if i:
+                            grads1 = torch.cat((grads1, grads_this), 2)
+                        else:
+                            grads1 = grads_this
 
                     grads1 = grads1 ** 2.
-                    grads1 = grads1.cpu().numpy()
+                    grads1 = grads1.numpy()
 
                 if (self.penalization_variable_theta0
                     and theta0v is not None):
