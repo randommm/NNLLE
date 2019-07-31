@@ -98,7 +98,7 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
           preds.mean(), " ", grads1.mean(),
           (grads2 if grads2 is not None else None)
          )
-    dddf
+
     # print("special predict on test (locallinearr):",
           # (nnlocallinear_obj._special_predict(x_test)).mean()
          # )

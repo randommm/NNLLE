@@ -466,24 +466,22 @@ n_train = x_train.shape[0] - n_test
 
             # Derivative penalization start
             if grad_out:
-                if self.penalization_thetas:
-                    for i in range(thetas.shape[1]):
-                        grads_this, = torch.autograd.grad(
-                            thetas[:, i].sum(), inputv,
-                            retain_graph=True,
-                            )
+                for i in range(thetas.shape[1]):
+                    grads_this, = torch.autograd.grad(
+                        thetas[:, i].sum(), inputv,
+                        retain_graph=True,
+                        )
 
-                        grads_this = grads_this[:, :, None].cpu()
-                        if i:
-                            grads1 = torch.cat((grads1, grads_this), 2)
-                        else:
-                            grads1 = grads_this
+                    grads_this = grads_this[:, :, None].cpu()
+                    if i:
+                        grads1 = torch.cat((grads1, grads_this), 2)
+                    else:
+                        grads1 = grads_this
 
-                    grads1 = grads1 ** 2.
-                    grads1 = grads1.numpy()
+                grads1 = grads1 ** 2.
+                grads1 = grads1.numpy()
 
-                if (self.penalization_variable_theta0
-                    and theta0v is not None):
+                if theta0v is not None:
                     grads2, = torch.autograd.grad(
                             theta0v.sum(), inputv,
                             )
