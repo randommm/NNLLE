@@ -83,7 +83,6 @@ n_train = x_train.shape[0] - n_test
                  nn_weight_decay=0,
                  num_layers=3,
                  hidden_size=100,
-                 convolutional=False,
 
                  es = True,
                  es_validation_set_size = None,
@@ -108,6 +107,8 @@ n_train = x_train.shape[0] - n_test
 
                  penalization_thetas=0,
                  penalization_variable_theta0=0,
+
+                 n_classification_labels=0,
                  ):
 
         for prop in dir():
@@ -148,7 +149,6 @@ n_train = x_train.shape[0] - n_test
     def improve_fit(self, x_train, y_train, nepoch=1):
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
-        criterion = nn.MSELoss()
 
         if self.scale_data:
             x_train = self.scaler.transform(x_train)
@@ -162,8 +162,15 @@ n_train = x_train.shape[0] - n_test
         assert(self.num_layers >= 0)
         assert(self.hidden_size > 0)
 
+        if self.n_classification_labels:
+            y_dtype = np.int64
+            criterion = nn.CrossEntropyLoss()
+        else:
+            y_dtype = "f4"
+            criterion = nn.MSELoss()
+
         inputv_train = np.array(x_train, dtype='f4')
-        target_train = np.array(y_train, dtype='f4')
+        target_train = np.array(y_train, dtype=y_dtype)
 
         range_epoch = range(nepoch)
         if self.es:
@@ -319,41 +326,60 @@ n_train = x_train.shape[0] - n_test
 
                 optimizer.zero_grad()
                 theta0v, theta0f, thetas = self.neural_net(inputv_this)
-                output = (thetas * inputv_this).sum(1, True)
+
+                inputs_ext = inputv_this
+                if self.n_classification_labels:
+                    inputs_ext = inputv_this[..., None]
+
+                output = (thetas * inputs_ext).sum(1, True)
 
                 if theta0v is not None:
                     output = output + theta0v
                 if theta0f is not None:
                     output = output + theta0f
 
+                if self.n_classification_labels:
+                    output = output.transpose(1,2)
+
                 loss = criterion(output, target_this)
 
                 # Derivative penalization start
+                if not self.n_classification_labels:
+                    thetas = thetas[..., None]
+                    if theta0v is not None:
+                        theta0v = theta0v[..., None]
+
                 if self.penalization_thetas:
                     for i in range(thetas.shape[1]):
-                        grads_this, = torch.autograd.grad(
-                            thetas[:, i].sum(), inputv_this,
-                            create_graph=True,
-                            )
-                        loss_this = (grads_this**2).mean(0).sum()
-                        if i:
-                            loss2 = loss2 + loss_this
-                        else:
-                            loss2 = loss_this
+                        for j in range(thetas.shape[2]):
+                            grads_this, = torch.autograd.grad(
+                                thetas[:, i, j].sum(), inputv_this,
+                                create_graph=True,
+                                )
+                            loss_this = (grads_this**2).mean(0).sum()
+                            if i or j:
+                                loss2 = loss2 + loss_this
+                            else:
+                                loss2 = loss_this
 
                     loss2 = loss2 * self.penalization_thetas
                     loss = loss + loss2
 
                 if (self.penalization_variable_theta0
                     and theta0v is not None):
-                    grads_this, = torch.autograd.grad(
-                            theta0v.sum(), inputv_this,
-                            create_graph=True,
-                            )
+                    for i in range(theta0v.shape[1]):
+                        grads_this, = torch.autograd.grad(
+                                theta0v[i].sum(), inputv_this,
+                                create_graph=True,
+                                )
 
-                    loss3 = (grads_this ** 2).mean(0).sum()
-                    loss3 = loss3 * self.penalization_variable_theta0
-
+                        loss_this = (grads_this ** 2).mean(0).sum()
+                        loss_this = loss_this * (
+                            self.penalization_variable_theta0)
+                        if i:
+                                loss3 = loss3 + loss_this
+                        else:
+                                loss3 = loss_this
                     loss = loss + loss3
                 # Derivative penalization end
 
@@ -387,7 +413,13 @@ n_train = x_train.shape[0] - n_test
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(np.ascontiguousarray(x_test))
-            target = _np_to_tensor(y_test)
+            y_test = np.ascontiguousarray(y_test)
+
+            if self.n_classification_labels:
+                target = np.array(y_test, dtype=np.int64)
+                target = torch.as_tensor(target)
+            else:
+                target = _np_to_tensor(y_test)
 
             batch_size = min(self.batch_test_size, x_test.shape[0])
 
@@ -407,19 +439,52 @@ n_train = x_train.shape[0] - n_test
 
                 batch_actual_size = inputv_this.shape[0]
                 theta0v, theta0f, thetas = self.neural_net(inputv_this)
-                output = (thetas * inputv_this).sum(1, True)
+
+                inputs_ext = inputv_this
+                criterion = nn.MSELoss()
+                if self.n_classification_labels:
+                    inputs_ext = inputv_this[..., None]
+                    criterion = nn.CrossEntropyLoss()
+
+                output = (thetas * inputs_ext).sum(1, True)
+
                 if theta0v is not None:
                     output = output + theta0v
                 if theta0f is not None:
                     output = output + theta0f
 
-                criterion = nn.MSELoss()
+                if self.n_classification_labels:
+                    output = output.transpose(1,2)
+
                 loss = criterion(output, target_this)
 
                 loss_vals.append(loss.data.item())
                 batch_sizes.append(batch_actual_size)
 
             return -1 * np.average(loss_vals, weights=batch_sizes)
+
+    def predict_proba(self, x_pred, grad_out=False):
+        """
+        Predict probabilities of y (if in classification mode).
+
+        Parameters
+        ----------
+        x_pred : array
+            Matrix of features
+        grad_out :
+            If True, then will output a tuple where the first element is
+            the predicted value of y, the second is a numpy array with
+            squared gradients of regarding the thetas of each variable,
+            and the third is squared gradients of regarding the thetas
+            of the varying theta0 (None if self.varying_theta0 is
+            False). Note that in case of the second element of the tuple
+            the array has shape (no_instances, no_features, no_features)
+            where the second dimension refers to denominator of the
+            derivative and the third dimension refers to the numerator
+            of the derivative). You can concatenate both with:
+            `np.concatenate((res[2][:,:,None], res[1]), 2)`
+        """
+        return self._predict_all(x_pred, grad_out, True)
 
     def predict(self, x_pred, grad_out=False):
         """
@@ -442,6 +507,9 @@ n_train = x_train.shape[0] - n_test
             of the derivative). You can concatenate both with:
             `np.concatenate((res[2][:,:,None], res[1]), 2)`
         """
+        return self._predict_all(x_pred, grad_out, False)
+
+    def _predict_all(self, x_pred, grad_out, out_probs):
         if self.scale_data:
             x_pred = self.scaler.transform(x_pred)
 
@@ -456,11 +524,23 @@ n_train = x_train.shape[0] - n_test
                 inputv = inputv.requires_grad_(True)
 
             theta0v, theta0f, thetas = self.neural_net(inputv)
-            output_pred = (thetas * inputv).sum(1, True)
+
+            inputs_ext = inputv
+            if self.n_classification_labels:
+                inputs_ext = inputv[..., None]
+
+            output_pred = (thetas * inputs_ext).sum(1, True)
             if theta0v is not None:
                 output_pred = output_pred + theta0v
             if theta0f is not None:
                 output_pred = output_pred + theta0f
+
+            if self.n_classification_labels:
+                output_pred = output_pred[:, 0]
+                if out_probs:
+                    output_pred = F.softmax(output_pred, 1)
+                else:
+                    output_pred = torch.max(output_pred, 1, True).values
 
             output_pred = output_pred.data.cpu().numpy()
 
@@ -499,49 +579,19 @@ n_train = x_train.shape[0] - n_test
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
-                         hidden_size, convolutional,
+                         hidden_size, n_classification_labels,
                          varying_theta0, fixed_theta0):
                 super(NeuralNet, self).__init__()
 
                 output_hl_size = int(hidden_size)
                 self.dropl = nn.Dropout(p=0.5)
-                self.convolutional = convolutional
                 self.varying_theta0 = varying_theta0
                 self.fixed_theta0 = fixed_theta0
+                self.n_classification_labels = n_classification_labels
                 next_input_l_size = x_dim
 
                 if self.fixed_theta0:
                     self.theta0f = nn.Parameter(torch.FloatTensor([.0]))
-
-                if self.convolutional:
-                    next_input_l_size = 1
-                    self.nclayers = 4
-                    clayers = []
-                    polayers = []
-                    normclayers = []
-                    for i in range(self.nclayers):
-                        if next_input_l_size == 1:
-                            output_hl_size = 16
-                        else:
-                            output_hl_size = 32
-                        clayers.append(nn.Conv1d(next_input_l_size,
-                            output_hl_size, kernel_size=5, stride=1,
-                            padding=2))
-                        polayers.append(nn.MaxPool1d(stride=1,
-                            kernel_size=5, padding=2))
-                        normclayers.append(nn.BatchNorm1d(output_hl_size))
-                        next_input_l_size = output_hl_size
-                        self._initialize_layer(clayers[i])
-                    self.clayers = nn.ModuleList(clayers)
-                    self.polayers = nn.ModuleList(polayers)
-                    self.normclayers = nn.ModuleList(normclayers)
-
-                    faked = torch.randn(2, 1, x_dim)
-                    for i in range(self.nclayers):
-                        faked = polayers[i](clayers[i](faked))
-                    faked = faked.view(faked.size(0), -1)
-                    next_input_l_size = faked.size(1)
-                    del(faked)
 
                 llayers = []
                 normllayers = []
@@ -555,23 +605,16 @@ n_train = x_train.shape[0] - n_test
                 self.llayers = nn.ModuleList(llayers)
                 self.normllayers = nn.ModuleList(normllayers)
 
+                flo_dim = x_dim + varying_theta0
+                if self.n_classification_labels:
+                    flo_dim = flo_dim * self.n_classification_labels
                 self.fc_last = nn.Linear(next_input_l_size,
-                    x_dim + varying_theta0)
+                    flo_dim)
                 self._initialize_layer(self.fc_last)
                 self.num_layers = num_layers
                 self.elu = nn.ELU()
 
             def forward(self, x):
-                if self.convolutional:
-                    x = x[:, None]
-                    for i in range(self.nclayers):
-                        fc = self.clayers[i]
-                        fpo = self.polayers[i]
-                        fcn = self.normclayers[i]
-                        x = fcn(self.elu(fc(x)))
-                        x = fpo(x)
-                    x = x.view(x.size(0), -1)
-
                 for i in range(self.num_layers):
                     fc = self.llayers[i]
                     fcn = self.normllayers[i]
@@ -579,6 +622,12 @@ n_train = x_train.shape[0] - n_test
                     x = self.dropl(x)
 
                 thetas = self.fc_last(x)
+                if self.n_classification_labels:
+                    thetas = thetas.view(
+                        thetas.shape[0],
+                        -1,
+                        self.n_classification_labels
+                        )
                 if self.varying_theta0:
                     theta0v = thetas[:, :1]
                     thetas = thetas[:, 1:]
@@ -600,7 +649,7 @@ n_train = x_train.shape[0] - n_test
 
         self.neural_net = NeuralNet(self.x_dim, self.y_dim,
                                     self.num_layers, self.hidden_size,
-                                    self.convolutional,
+                                    self.n_classification_labels,
                                     self.varying_theta0,
                                     self.fixed_theta0)
 
@@ -617,6 +666,10 @@ n_train = x_train.shape[0] - n_test
 
     def __setstate__(self, d):
         self.__dict__ = d
+
+        # backward-compatibility
+        if "n_classification_labels" not in d.keys():
+            self.n_classification_labels = 0
 
         if "neural_net_params" in d.keys():
             self._construct_neural_net()
@@ -662,6 +715,10 @@ n_train = x_train.shape[0] - n_test
                 if self.gpu:
                     scale = scale.cuda()
                     mean = mean.cuda()
+                if self.n_classification_labels:
+                    scale = scale[:, None]
+                    mean = mean[:, None]
+
                 thetas = thetas / scale
 
                 if theta0v is None:
@@ -672,6 +729,7 @@ n_train = x_train.shape[0] - n_test
                 if theta0f is not None:
                     theta0f = theta0f.data.cpu().numpy()
                 thetas = thetas.data.cpu().numpy()
+
                 return theta0v, theta0f, thetas
 
 
@@ -785,7 +843,6 @@ n_train = x_train.shape[0] - n_test
                  nn_weight_decay=0,
                  num_layers=3,
                  hidden_size=100,
-                 convolutional=False,
 
                  es = True,
                  es_validation_set_size = None,
@@ -802,6 +859,8 @@ n_train = x_train.shape[0] - n_test
                  batch_test_size=2000,
                  gpu=True,
                  verbose=1,
+
+                 n_classification_labels=0,
                  ):
 
         for prop in dir():
@@ -1066,7 +1125,7 @@ n_train = x_train.shape[0] - n_test
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
-                         hidden_size, convolutional):
+                         hidden_size, n_classification_labels):
                 super(NeuralNet, self).__init__()
 
                 output_hl_size = int(hidden_size)
@@ -1147,7 +1206,7 @@ n_train = x_train.shape[0] - n_test
 
         self.neural_net = NeuralNet(self.x_dim, self.y_dim,
                                     self.num_layers, self.hidden_size,
-                                    self.convolutional)
+                                    self.n_classification_labels)
 
     def __getstate__(self):
         d = self.__dict__.copy()
@@ -1162,6 +1221,10 @@ n_train = x_train.shape[0] - n_test
 
     def __setstate__(self, d):
         self.__dict__ = d
+
+        # backward-compatibility
+        if "n_classification_labels" not in d.keys():
+            self.n_classification_labels = 0
 
         if "neural_net_params" in d.keys():
             self._construct_neural_net()

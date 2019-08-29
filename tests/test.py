@@ -24,6 +24,8 @@ from generate_data import generate_data
 import pandas as pd
 import itertools
 
+classification = True
+
 s_penalization_thetas = [0.0, 0.01, 0.1, 0.5]
 s_penalization_variable_theta0 = [0.0, 0.01, 0.1, 0.5]
 s_scale_data = [True, False]
@@ -47,26 +49,50 @@ df = pd.DataFrame(columns=[
 for penalization_thetas, penalization_variable_theta0, scale_data, complexity, varying_theta0, fixed_theta0 in prods:
     np.random.seed(10)
 
-    n_train = 9_000
+    n_train = 1_000
     n_val = 1_000
     n_test = 5_000
     x_train, y_train = generate_data(n_train)
     x_val, y_val = generate_data(n_val)
     x_test, y_test = generate_data(n_test)
 
+    if classification:
+        cutp1 = (max(y_train) + min(y_train)) / 3
+        cutp2 = 2*(max(y_train) + min(y_train)) / 3
+
+        y_train_n = np.zeros_like(y_train)
+        y_train_n[y_train>cutp1] = 1
+        y_train_n[y_train>cutp2] = 2
+        y_train = y_train_n
+
+        y_val_n = np.zeros_like(y_val)
+        y_val_n[y_val>cutp1] = 1
+        y_val_n[y_val>cutp2] = 2
+        y_val = y_val_n
+
+        y_test_n = np.zeros_like(y_test)
+        y_test_n[y_test>cutp1] = 1
+        y_test_n[y_test>cutp2] = 2
+        y_test = y_test_n
+        n_classification_labels = 3
+    else:
+        n_classification_labels
+
     np.random.seed()
+
     # print(y_train)
     # print(min(y_train))
     # print(max(y_train))
 
     nnlocallinear_obj = NLS(
-    es_give_up_after_nepochs=30,
-    verbose=1,
+    es_give_up_after_nepochs=1,
+    verbose=2,
     es=True,
     hidden_size=complexity,
     num_layers=3,
     gpu=True,
     dataloader_workers=1,
+    batch_initial=100,
 
     scale_data=scale_data,
     varying_theta0=varying_theta0,
@@ -74,6 +100,7 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
 
     penalization_thetas=penalization_thetas,
     penalization_variable_theta0= penalization_variable_theta0,
+    n_classification_labels = n_classification_labels,
     )
     nnlocallinear_obj.fit(x_train, y_train)
 
@@ -89,6 +116,13 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
     print("mse on test (locallinearr):",
           ((nnlocallinear_obj.predict(x_test) - y_test)**2).mean()
          )
+
+    if classification:
+        mse_test = - nnlocallinear_obj.score(x_test, y_test)
+        print("mse on test (locallinearr):", mse_test)
+        print("mse on test (locallinearr):",
+              (nnlocallinear_obj.predict_proba(x_test)).mean()
+             )
 
     print("predict on test (locallinearr):",
           (nnlocallinear_obj.predict(x_test)).mean()
