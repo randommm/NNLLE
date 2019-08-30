@@ -851,6 +851,7 @@ n_train = x_train.shape[0] - n_test
 
                  nepoch=200,
 
+                 dataloader_workers=1,
                  batch_initial=300,
                  batch_step_multiplier=1.4,
                  batch_step_epoch_expon=2.0,
@@ -898,7 +899,6 @@ n_train = x_train.shape[0] - n_test
     def improve_fit(self, x_train, y_train, nepoch=1):
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
-        criterion = nn.MSELoss()
 
         assert(self.batch_initial >= 1)
         assert(self.batch_step_multiplier > 0)
@@ -909,8 +909,15 @@ n_train = x_train.shape[0] - n_test
         assert(self.num_layers >= 0)
         assert(self.hidden_size > 0)
 
+        if self.n_classification_labels:
+            y_dtype = np.int64
+            criterion = nn.CrossEntropyLoss()
+        else:
+            y_dtype = "f4"
+            criterion = nn.MSELoss()
+
         inputv_train = np.array(x_train, dtype='f4')
-        target_train = np.array(y_train, dtype='f4')
+        target_train = np.array(y_train, dtype=y_dtype)
 
         range_epoch = range(nepoch)
         if self.es:
@@ -1044,7 +1051,9 @@ n_train = x_train.shape[0] - n_test
             tdataset = data.TensorDataset(inputv, target)
             data_loader = data.DataLoader(tdataset,
                 batch_size=batch_size, shuffle=True, drop_last=is_train,
-                pin_memory=self.gpu, num_workers=1)
+                pin_memory=self.gpu,
+                num_workers=self.dataloader_workers,
+                )
 
             for inputv_this, target_this in data_loader:
                 if self.gpu:
@@ -1054,6 +1063,8 @@ n_train = x_train.shape[0] - n_test
                 batch_actual_size = inputv_this.shape[0]
                 optimizer.zero_grad()
                 output = self.neural_net(inputv_this)
+                if self.n_classification_labels:
+                    target_this = target_this[:, 0]
                 loss = criterion(output, target_this)
 
                 np_loss = loss.data.item()
@@ -1083,7 +1094,15 @@ n_train = x_train.shape[0] - n_test
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(np.ascontiguousarray(x_test))
-            target = _np_to_tensor(y_test)
+            y_test = np.ascontiguousarray(y_test)
+
+            if self.n_classification_labels:
+                target = np.array(y_test, dtype=np.int64)
+                target = torch.as_tensor(target)
+                criterion = nn.CrossEntropyLoss()
+            else:
+                target = _np_to_tensor(y_test)
+                criterion = nn.MSELoss()
 
             batch_size = min(self.batch_test_size, x_test.shape[0])
 
@@ -1093,7 +1112,9 @@ n_train = x_train.shape[0] - n_test
             tdataset = data.TensorDataset(inputv, target)
             data_loader = data.DataLoader(tdataset,
                 batch_size=batch_size, shuffle=True, drop_last=False,
-                pin_memory=self.gpu, num_workers=1)
+                pin_memory=self.gpu,
+                num_workers=self.dataloader_workers,
+                )
 
             for inputv_this, target_this in data_loader:
                 if self.gpu:
@@ -1102,7 +1123,8 @@ n_train = x_train.shape[0] - n_test
 
                 batch_actual_size = inputv_this.shape[0]
                 output = self.neural_net(inputv_this)
-                criterion = nn.MSELoss()
+                if self.n_classification_labels:
+                    target_this = target_this[:, 0]
                 loss = criterion(output, target_this)
 
                 loss_vals.append(loss.data.item())
@@ -1110,7 +1132,7 @@ n_train = x_train.shape[0] - n_test
 
             return -1 * np.average(loss_vals, weights=batch_sizes)
 
-    def predict(self, x_pred):
+    def _predict_all(self, x_pred, out_probs):
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(x_pred)
@@ -1119,8 +1141,19 @@ n_train = x_train.shape[0] - n_test
                 inputv = inputv.cuda()
 
             output_pred = self.neural_net(inputv)
+            if self.n_classification_labels:
+                if out_probs:
+                    output_pred = F.softmax(output_pred, 1)
+                else:
+                    output_pred = torch.max(output_pred, 1, True).values
 
             return output_pred.data.cpu().numpy()
+
+    def predict_proba(self, x_pred):
+        return self._predict_all(x_pred, True)
+
+    def predict(self, x_pred):
+        return self._predict_all(x_pred, False)
 
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
@@ -1128,40 +1161,13 @@ n_train = x_train.shape[0] - n_test
                          hidden_size, n_classification_labels):
                 super(NeuralNet, self).__init__()
 
+                if n_classification_labels:
+                    assert(y_dim==1)
+                    y_dim = n_classification_labels
+
                 output_hl_size = int(hidden_size)
                 self.dropl = nn.Dropout(p=0.5)
-                self.convolutional = convolutional
                 next_input_l_size = x_dim
-
-                if self.convolutional:
-                    next_input_l_size = 1
-                    self.nclayers = 4
-                    clayers = []
-                    polayers = []
-                    normclayers = []
-                    for i in range(self.nclayers):
-                        if next_input_l_size == 1:
-                            output_hl_size = 16
-                        else:
-                            output_hl_size = 32
-                        clayers.append(nn.Conv1d(next_input_l_size,
-                            output_hl_size, kernel_size=5, stride=1,
-                            padding=2))
-                        polayers.append(nn.MaxPool1d(stride=1,
-                            kernel_size=5, padding=2))
-                        normclayers.append(nn.BatchNorm1d(output_hl_size))
-                        next_input_l_size = output_hl_size
-                        self._initialize_layer(clayers[i])
-                    self.clayers = nn.ModuleList(clayers)
-                    self.polayers = nn.ModuleList(polayers)
-                    self.normclayers = nn.ModuleList(normclayers)
-
-                    faked = torch.randn(2, 1, x_dim)
-                    for i in range(self.nclayers):
-                        faked = polayers[i](clayers[i](faked))
-                    faked = faked.view(faked.size(0), -1)
-                    next_input_l_size = faked.size(1)
-                    del(faked)
 
                 llayers = []
                 normllayers = []
@@ -1180,16 +1186,6 @@ n_train = x_train.shape[0] - n_test
                 self.num_layers = num_layers
 
             def forward(self, x):
-                if self.convolutional:
-                    x = x[:, None]
-                    for i in range(self.nclayers):
-                        fc = self.clayers[i]
-                        fpo = self.polayers[i]
-                        fcn = self.normclayers[i]
-                        x = fcn(F.elu(fc(x)))
-                        x = fpo(x)
-                    x = x.view(x.size(0), -1)
-
                 for i in range(self.num_layers):
                     fc = self.llayers[i]
                     fcn = self.normllayers[i]
