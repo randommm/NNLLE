@@ -251,15 +251,7 @@ n_train = x_train.shape[0] - n_test
                     else:
                         es_tries += 1
 
-                    if (es_tries == self.es_give_up_after_nepochs // 3
-                        or
-                        es_tries == self.es_give_up_after_nepochs // 3
-                        * 2):
-                        if self.verbose >= 2:
-                            print("Attemping to restart from best point.")
-                        #self.optimizer.param_groups[0]['lr'] *= 0.5
-                        self.neural_net.load_state_dict(best_state_dict)
-                    elif es_tries >= self.es_give_up_after_nepochs:
+                    if es_tries >= self.es_give_up_after_nepochs:
                         self.neural_net.load_state_dict(best_state_dict)
                         if self.verbose >= 1:
                             print("Validation loss did not improve after",
