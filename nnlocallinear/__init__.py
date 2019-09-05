@@ -1,6 +1,6 @@
-from .core import NLS
-from .core import LLS
-from .core import NNPredict
+from .lmethods import NLS
+from .lmethods import LLS
+from .predict import NNPredict
 
 __version__ = "0.0.1-dev"
 
