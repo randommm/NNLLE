@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils import data
+from .radam import RAdam
 
 import numpy as np
 import time
@@ -109,6 +110,8 @@ n_train = x_train.shape[0] - n_test
                  penalization_variable_theta0=0,
 
                  n_classification_labels=0,
+
+                 optim_lr=1e-3,
                  ):
 
         for prop in dir():
@@ -209,9 +212,8 @@ n_train = x_train.shape[0] - n_test
 
         start_time = time.time()
 
-        lr = 0.1
-        self.optimizer = optim.Adamax(self.neural_net.parameters(),
-                                lr=lr,
+        self.optimizer = RAdam(self.neural_net.parameters(),
+                                lr=self.optim_lr,
                                 weight_decay=self.nn_weight_decay)
         err_count = 0
         es_penal_tries = 0
@@ -254,8 +256,8 @@ n_train = x_train.shape[0] - n_test
                         es_tries == self.es_give_up_after_nepochs // 3
                         * 2):
                         if self.verbose >= 2:
-                            print("Decreasing learning rate by half.")
-                        self.optimizer.param_groups[0]['lr'] *= 0.5
+                            print("Attemping to restart from best point.")
+                        #self.optimizer.param_groups[0]['lr'] *= 0.5
                         self.neural_net.load_state_dict(best_state_dict)
                     elif es_tries >= self.es_give_up_after_nepochs:
                         self.neural_net.load_state_dict(best_state_dict)
@@ -279,10 +281,10 @@ n_train = x_train.shape[0] - n_test
                 self._construct_neural_net()
                 if self.gpu:
                     self.move_to_gpu()
-                lr /= 2
-                self.optimizer = optim.Adamax(
+                self.optim_lr /= 2
+                self.optimizer = RAdam(
                     self.neural_net.parameters(),
-                    lr=lr, weight_decay=self.nn_weight_decay)
+                    lr=self.optim_lr, weight_decay=self.nn_weight_decay)
                 self.epoch_count = 0
 
                 continue
@@ -862,6 +864,8 @@ n_train = x_train.shape[0] - n_test
                  verbose=1,
 
                  n_classification_labels=0,
+
+                 optim_lr=1e-3
                  ):
 
         for prop in dir():
@@ -956,9 +960,8 @@ n_train = x_train.shape[0] - n_test
 
         start_time = time.time()
 
-        lr = 0.1
-        optimizer = optim.Adamax(self.neural_net.parameters(), lr=lr,
-                                 weight_decay=self.nn_weight_decay)
+        optimizer = RAdam(self.neural_net.parameters(), lr=self.optim_lr,
+                          weight_decay=self.nn_weight_decay)
         es_penal_tries = 0
         for _ in range_epoch:
             batch_size = int(min(batch_max_size,
@@ -998,8 +1001,8 @@ n_train = x_train.shape[0] - n_test
                         es_tries == self.es_give_up_after_nepochs // 3
                         * 2):
                         if self.verbose >= 2:
-                            print("Decreasing learning rate by half.")
-                        optimizer.param_groups[0]['lr'] *= 0.5
+                            print("Attemping to restart from best point.")
+                        #optimizer.param_groups[0]['lr'] *= 0.5
                         self.neural_net.load_state_dict(best_state_dict)
                     elif es_tries >= self.es_give_up_after_nepochs:
                         self.neural_net.load_state_dict(best_state_dict)
@@ -1019,9 +1022,9 @@ n_train = x_train.shape[0] - n_test
                 self._construct_neural_net()
                 if self.gpu:
                     self.move_to_gpu()
-                lr /= 2
-                optimizer = optim.Adamax(self.neural_net.parameters(),
-                    lr=lr, weight_decay=self.nn_weight_decay)
+                self.optim_lr /= 2
+                optimizer = RAdam(self.neural_net.parameters(),
+                    lr=self.optim_lr, weight_decay=self.nn_weight_decay)
                 self.epoch_count = 0
 
                 continue

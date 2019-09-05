@@ -27,6 +27,7 @@ import os
 
 test_classification = True
 test_nnpred = False
+quick_test = True
 
 s_penalization_thetas = [0.0, 0.01, 0.1, 0.5]
 s_penalization_variable_theta0 = [0.0, 0.01, 0.1, 0.5]
@@ -87,7 +88,7 @@ for penalization_thetas, penalization_variable_theta0, scale_data, complexity, v
     # print(max(y_train))
 
     params = dict(
-    es_give_up_after_nepochs=1,
+    es_give_up_after_nepochs=(1 if quick_test else 30),
     verbose=2,
     es=True,
     hidden_size=complexity,
