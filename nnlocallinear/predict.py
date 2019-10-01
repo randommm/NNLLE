@@ -390,7 +390,8 @@ n_train = x_train.shape[0] - n_test
                 if out_probs:
                     output_pred = F.softmax(output_pred, 1)
                 else:
-                    output_pred = torch.max(output_pred, 1, True).values
+                    output_pred = (torch.max(output_pred, 1, True)
+                        .indices)
 
             return output_pred.data.cpu().numpy()
 
