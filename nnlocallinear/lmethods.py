@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils import data
-from .radam import RAdam
+from torch.optim import Adamax as optimm
 
 import numpy as np
 import time
@@ -97,6 +97,8 @@ n_train = x_train.shape[0] - n_test
                  batch_step_epoch_expon=2.0,
                  batch_max_size=1000,
 
+                 optim_lr=1e-3,
+
                  dataloader_workers=1,
                  batch_test_size=2000,
                  gpu=True,
@@ -110,8 +112,6 @@ n_train = x_train.shape[0] - n_test
                  penalization_variable_theta0=0,
 
                  n_classification_labels=0,
-
-                 optim_lr=1e-3,
                  ):
 
         for prop in dir():
@@ -212,9 +212,12 @@ n_train = x_train.shape[0] - n_test
 
         start_time = time.time()
 
-        self.optimizer = RAdam(self.neural_net.parameters(),
-                                lr=self.optim_lr,
-                                weight_decay=self.nn_weight_decay)
+        self.actual_optim_lr = self.optim_lr
+        optimizer = optimm(
+            self.neural_net.parameters(),
+            lr=self.actual_optim_lr,
+            weight_decay=self.nn_weight_decay
+        )
         err_count = 0
         es_penal_tries = 0
         for _ in range_epoch:
@@ -232,12 +235,12 @@ n_train = x_train.shape[0] - n_test
             try:
                 self.neural_net.train()
                 self._one_epoch(True, self.cur_batch_size, inputv_train,
-                                target_train, self.optimizer, criterion)
+                                target_train, optimizer, criterion)
 
                 if self.es:
                     self.neural_net.eval()
                     avloss = self._one_epoch(False, batch_test_size,
-                        inputv_val, target_val, self.optimizer,
+                        inputv_val, target_val, optimizer,
                         criterion)
                     self.loss_history_validation.append(avloss)
                     if avloss <= self.best_loss_val:
@@ -248,35 +251,51 @@ n_train = x_train.shape[0] - n_test
                         if self.verbose >= 2:
                             print("This is the lowest validation loss",
                                   "so far.")
+                        self.best_loss_history_validation = avloss
                     else:
                         es_tries += 1
 
-                    if es_tries >= self.es_give_up_after_nepochs:
-                        self.neural_net.load_state_dict(best_state_dict)
+                    if (es_tries == self.es_give_up_after_nepochs
+                        // 3 or
+                        es_tries == self.es_give_up_after_nepochs
+                        // 3 * 2):
+                        if self.verbose >= 2:
+                            print("No improvement for", es_tries,
+                             "tries")
+                            print("Decreasing learning rate by half")
+                            print("Restarting from best route.")
+                        optimizer.param_groups[0]['lr'] *= 0.5
+                        self.neural_net.load_state_dict(
+                            best_state_dict)
+                    elif es_tries >= self.es_give_up_after_nepochs:
+                        self.neural_net.load_state_dict(
+                            best_state_dict)
                         if self.verbose >= 1:
-                            print("Validation loss did not improve after",
-                                  self.es_give_up_after_nepochs, "tries.",
-                                  "Stopping")
+                            print(
+                                "Validation loss did not improve after",
+                                self.es_give_up_after_nepochs,
+                                "tries. Stopping"
+                            )
                         break
 
                 self.epoch_count += 1
             except RuntimeError as err:
-                err_count += 1
-                if err_count >= 4:
-                    raise err
-                print(err)
-                print("Runtime error problem probably due to",
-                      "high learning rate.")
-                print("Decreasing learning rate by half.",
-                    flush=True)
+                #if self.epoch_count == 0:
+                #    raise err
+                if self.verbose >= 2:
+                    print("Runtime error problem probably due to",
+                           "high learning rate.")
+                    print("Decreasing learning rate by half.")
 
                 self._construct_neural_net()
                 if self.gpu:
                     self.move_to_gpu()
-                self.optim_lr /= 2
-                self.optimizer = RAdam(
+                self.actual_optim_lr /= 2
+                optimizer = optimm(
                     self.neural_net.parameters(),
-                    lr=self.optim_lr, weight_decay=self.nn_weight_decay)
+                    lr=self.actual_optim_lr,
+                    weight_decay=self.nn_weight_decay
+                )
                 self.epoch_count = 0
 
                 continue
@@ -494,8 +513,8 @@ n_train = x_train.shape[0] - n_test
             squared gradients of regarding the thetas of each variable,
             and the third is squared gradients of regarding the thetas
             of the varying theta0 (None if self.varying_theta0 is
-            False). Note that in case of the second element of the tuple
-            the array has shape (no_instances, no_features, no_features)
+            False). Note that the second element of the tuple is an
+            array of shape (no_instances, no_features, no_features)
             where the second dimension refers to denominator of the
             derivative and the third dimension refers to the numerator
             of the derivative). You can concatenate both with:
