@@ -114,8 +114,12 @@ n_train = x_train.shape[0] - n_test
                  batch_test_size=2000,
                  gpu=True,
                  verbose=1,
+                 scale_data=True,
 
                  n_classification_labels=0,
+
+                 use_relu=False,
+                 last_transf_to_apply=None,
                  ):
 
         for prop in dir():
@@ -123,6 +127,9 @@ n_train = x_train.shape[0] - n_test
                 setattr(self, prop, locals()[prop])
 
     def fit(self, x_train, y_train):
+        if self.scale_data:
+            self.scaler = StandardScaler()
+            self.scaler.fit(x_train)
         self.gpu = self.gpu and torch.cuda.is_available()
 
         self.x_dim = x_train.shape[1]
@@ -153,6 +160,9 @@ n_train = x_train.shape[0] - n_test
     def improve_fit(self, x_train, y_train, nepoch=1):
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
+
+        if self.scale_data:
+            x_train = self.scaler.transform(x_train)
 
         assert(self.batch_initial >= 1)
         assert(self.batch_step_multiplier > 0)
@@ -361,6 +371,9 @@ n_train = x_train.shape[0] - n_test
         if len(y_test.shape) == 1:
             y_test = y_test[:, None]
 
+        if self.scale_data:
+            x_test = self.scaler.transform(x_test)
+
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(np.ascontiguousarray(x_test))
@@ -403,6 +416,9 @@ n_train = x_train.shape[0] - n_test
             return -1 * np.average(loss_vals, weights=batch_sizes)
 
     def _predict_all(self, x_pred, out_probs):
+        if self.scale_data:
+            x_pred = self.scaler.transform(x_pred)
+
         with torch.no_grad():
             self.neural_net.eval()
             inputv = _np_to_tensor(x_pred)
@@ -429,11 +445,12 @@ n_train = x_train.shape[0] - n_test
     def _construct_neural_net(self):
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
-                         hidden_size, n_classification_labels):
+                         hidden_size, n_classification_labels,
+                         use_relu, last_transf_to_apply):
                 super(NeuralNet, self).__init__()
 
                 if n_classification_labels:
-                    assert(y_dim==1)
+                    assert y_dim==1
                     y_dim = n_classification_labels
 
                 output_hl_size = int(hidden_size)
@@ -456,13 +473,23 @@ n_train = x_train.shape[0] - n_test
                 self._initialize_layer(self.fc_last)
                 self.num_layers = num_layers
 
+                self.last_transf_to_apply = last_transf_to_apply
+
+                if use_relu:
+                    self.activation = nn.ReLU()
+                else:
+                    self.activation = nn.ELU()
+
             def forward(self, x):
                 for i in range(self.num_layers):
                     fc = self.llayers[i]
                     fcn = self.normllayers[i]
-                    x = fcn(F.elu(fc(x)))
+                    x = fcn(self.activation(fc(x)))
                     x = self.dropl(x)
                 x = self.fc_last(x)
+
+                if self.last_transf_to_apply:
+                    x = self.last_transf_to_apply(x)
 
                 return x
 
@@ -473,7 +500,9 @@ n_train = x_train.shape[0] - n_test
 
         self.neural_net = NeuralNet(self.x_dim, self.y_dim,
                                     self.num_layers, self.hidden_size,
-                                    self.n_classification_labels)
+                                    self.n_classification_labels,
+                                    self.use_relu,
+                                    self.last_transf_to_apply)
 
     def __getstate__(self):
         d = self.__dict__.copy()
