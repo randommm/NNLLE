@@ -95,11 +95,14 @@ n_train = x_train.shape[0] - n_test
                  nn_weight_decay=0,
                  num_layers=3,
                  hidden_size=100,
+                 dropout_rate=0.5,
+                 batch_normalization=True,
 
                  es = True,
                  es_validation_set_size = None,
                  es_give_up_after_nepochs = 30,
                  es_splitter_random_state = 0,
+                 es_max_epochs = 10000,
 
                  nepoch=200,
 
@@ -284,6 +287,17 @@ n_train = x_train.shape[0] - n_test
                             )
                         break
 
+                    if self.epoch_count+1 >= self.es_max_epochs:
+                        self.neural_net.load_state_dict(
+                            best_state_dict)
+                        if self.verbose >= 1:
+                            print(
+                                "Reached max number of epochs",
+                                self.es_max_epochs,
+                                "tries. Stopping"
+                            )
+                        break
+
                 self.epoch_count += 1
             except RuntimeError as err:
                 #if self.epoch_count == 0:
@@ -446,7 +460,8 @@ n_train = x_train.shape[0] - n_test
         class NeuralNet(nn.Module):
             def __init__(self, x_dim, y_dim, num_layers,
                          hidden_size, n_classification_labels,
-                         use_relu, last_transf_to_apply):
+                         use_relu, last_transf_to_apply,
+                         dropout_rate, batch_normalization):
                 super(NeuralNet, self).__init__()
 
                 if n_classification_labels:
@@ -454,7 +469,7 @@ n_train = x_train.shape[0] - n_test
                     y_dim = n_classification_labels
 
                 output_hl_size = int(hidden_size)
-                self.dropl = nn.Dropout(p=0.5)
+                self.dropl = nn.Dropout(p=dropout_rate)
                 next_input_l_size = x_dim
 
                 llayers = []
@@ -462,7 +477,9 @@ n_train = x_train.shape[0] - n_test
                 for i in range(num_layers):
                     llayers.append(nn.Linear(next_input_l_size,
                                              output_hl_size))
-                    normllayers.append(nn.BatchNorm1d(output_hl_size))
+                    if batch_normalization:
+                        normllayers.append(nn.BatchNorm1d(
+                            output_hl_size))
                     next_input_l_size = output_hl_size
                     self._initialize_layer(llayers[i])
 
@@ -474,6 +491,7 @@ n_train = x_train.shape[0] - n_test
                 self.num_layers = num_layers
 
                 self.last_transf_to_apply = last_transf_to_apply
+                self.batch_normalization = batch_normalization
 
                 if use_relu:
                     self.activation = nn.ReLU()
@@ -483,8 +501,9 @@ n_train = x_train.shape[0] - n_test
             def forward(self, x):
                 for i in range(self.num_layers):
                     fc = self.llayers[i]
-                    fcn = self.normllayers[i]
-                    x = fcn(self.activation(fc(x)))
+                    x = self.activation(fc(x))
+                    if self.batch_normalization:
+                        x = self.normllayers[i](x)
                     x = self.dropl(x)
                 x = self.fc_last(x)
 
@@ -502,7 +521,10 @@ n_train = x_train.shape[0] - n_test
                                     self.num_layers, self.hidden_size,
                                     self.n_classification_labels,
                                     self.use_relu,
-                                    self.last_transf_to_apply)
+                                    self.last_transf_to_apply,
+                                    self.dropout_rate,
+                                    self.batch_normalization,
+                                    )
 
     def __getstate__(self):
         d = self.__dict__.copy()
