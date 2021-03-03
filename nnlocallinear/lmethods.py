@@ -29,6 +29,7 @@ from scipy import stats
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ShuffleSplit
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.utils.multiclass import unique_labels
 from copy import deepcopy
 from sklearn.preprocessing import StandardScaler
 import collections
@@ -119,6 +120,9 @@ n_train = x_train.shape[0] - n_test
                 setattr(self, prop, locals()[prop])
 
     def fit(self, x_train, y_train):
+        x_train = np.array(x_train, copy=False)
+        y_train = np.array(y_train, copy=False)
+
         if self.scale_data:
             self.scaler = StandardScaler()
             self.scaler.fit(x_train)
@@ -135,6 +139,8 @@ n_train = x_train.shape[0] - n_test
         if self.gpu:
             self.move_to_gpu()
 
+        if self.n_classification_labels:
+            self.classes_ = unique_labels(y_train)
         return self.improve_fit(x_train, y_train, self.nepoch)
 
     def move_to_gpu(self):
@@ -150,6 +156,9 @@ n_train = x_train.shape[0] - n_test
         return self
 
     def improve_fit(self, x_train, y_train, nepoch=1):
+        x_train = np.array(x_train, copy=False)
+        y_train = np.array(y_train, copy=False)
+
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
 
@@ -761,6 +770,8 @@ class LLS(BaseEstimator):
                 setattr(self, prop, locals()[prop])
 
     def fit(self, x_train, y_train):
+        x_train = np.array(x_train, copy=False)
+        y_train = np.array(y_train)
 
         self.x_train = np.hstack((np.ones((len(x_train), 1)), x_train))
         self.y_train = y_train
