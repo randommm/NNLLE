@@ -130,9 +130,11 @@ n_train = x_train.shape[0] - n_test
             if prop != "self":
                 setattr(self, prop, locals()[prop])
 
-    def fit(self, x_train, y_train):
+    def fit(self, x_train, y_train, weights = None):
         x_train = np.array(x_train, copy=False)
         y_train = np.array(y_train, copy=False)
+        if weights is not None:
+            weights = np.array(weights, copy=False)
 
         if self.scale_data:
             self.scaler = StandardScaler()
@@ -152,7 +154,7 @@ n_train = x_train.shape[0] - n_test
 
         if self.n_classification_labels:
             self.classes_ = unique_labels(y_train)
-        return self.improve_fit(x_train, y_train, self.nepoch)
+        return self.improve_fit(x_train, y_train, weights, self.nepoch)
 
     def move_to_gpu(self):
         self.neural_net.cuda()
@@ -166,9 +168,11 @@ n_train = x_train.shape[0] - n_test
 
         return self
 
-    def improve_fit(self, x_train, y_train, nepoch=1):
+    def improve_fit(self, x_train, y_train, weights, nepoch=1):
         x_train = np.array(x_train, copy=False)
         y_train = np.array(y_train, copy=False)
+        if weights is not None:
+            weights = np.array(weights, copy=False)
 
         if len(y_train.shape) == 1:
             y_train = y_train[:, None]
@@ -194,6 +198,8 @@ n_train = x_train.shape[0] - n_test
 
         inputv_train = np.array(x_train, dtype='f4')
         target_train = np.array(y_train, dtype=y_dtype)
+        if weights is not None:
+            weights = np.array(weights, dtype='f4')
 
         range_epoch = range(nepoch)
         if self.es:
@@ -213,11 +219,21 @@ n_train = x_train.shape[0] - n_test
             target_val = target_train[index_val]
             inputv_val = np.ascontiguousarray(inputv_val)
             target_val = np.ascontiguousarray(target_val)
+            if weights is not None:
+                weights_val = weights[index_val]
+                weights_val = np.ascontiguousarray(weights[index_val])
+            else:
+                weights_val = None
 
             inputv_train = inputv_train[index_train]
             target_train = target_train[index_train]
             inputv_train = np.ascontiguousarray(inputv_train)
             target_train = np.ascontiguousarray(target_train)
+            if weights is not None:
+                weights_train = weights[index_train]
+                weights_train = np.ascontiguousarray(weights[index_train])
+            else:
+                weights_train = None
 
             self.best_loss_val = np.infty
             es_tries = 0
@@ -250,16 +266,22 @@ n_train = x_train.shape[0] - n_test
             target_train = torch.from_numpy(target_train[permutation])
             inputv_train = np.ascontiguousarray(inputv_train)
             target_train = np.ascontiguousarray(target_train)
+            if weights is not None:
+                weights_train = weights_train[permutation]
+                weights_train = torch.from_numpy(weights_train)
+                weights_train = np.ascontiguousarray(weights_train)
 
             try:
                 self.neural_net.train()
                 self._one_epoch(True, batch_size, inputv_train,
-                                target_train, optimizer, criterion)
+                                target_train, weights_train, optimizer,
+                                criterion)
 
                 if self.es:
                     self.neural_net.eval()
                     avloss = self._one_epoch(False, batch_test_size,
-                        inputv_val, target_val, optimizer, criterion)
+                        inputv_val, target_val, weights_val,
+                        optimizer, criterion)
                     self.loss_history_validation.append(avloss)
                     if avloss <= self.best_loss_val:
                         self.best_loss_val = avloss
@@ -342,7 +364,7 @@ n_train = x_train.shape[0] - n_test
 
         return self
 
-    def _one_epoch(self, is_train, batch_size, inputv, target,
+    def _one_epoch(self, is_train, batch_size, inputv, target, weights,
         optimizer, criterion):
         with torch.set_grad_enabled(is_train):
             inputv = torch.from_numpy(inputv)
@@ -351,14 +373,22 @@ n_train = x_train.shape[0] - n_test
             loss_vals = []
             batch_sizes = []
 
-            tdataset = data.TensorDataset(inputv, target)
+            if weights is None:
+                tdataset = data.TensorDataset(inputv, target)
+            else:
+                weights = torch.from_numpy(weights)
+                tdataset = data.TensorDataset(inputv, target, weights)
             data_loader = data.DataLoader(tdataset,
                 batch_size=batch_size, shuffle=True, drop_last=is_train,
                 pin_memory=self.gpu,
                 num_workers=self.dataloader_workers,
                 )
 
-            for inputv_this, target_this in data_loader:
+            for batch_this in data_loader:
+                if weights is None:
+                    inputv_this, target_this = batch_this
+                else:
+                    inputv_this, target_this, weights_this = batch_this
                 if self.gpu:
                     inputv_this = inputv_this.cuda(non_blocking=True)
                     target_this = target_this.cuda(non_blocking=True)
@@ -368,7 +398,14 @@ n_train = x_train.shape[0] - n_test
                 output = self.neural_net(inputv_this)
                 if self.n_classification_labels:
                     target_this = target_this[:, 0]
-                loss = criterion(output, target_this)
+                if weights is not None:
+                    loss = criterion(output, target_this)
+                else:
+                    loss.reduction='none'
+                    loss = criterion(output, target_this)
+                    loss = loss * weights
+                    loss = loss.mean()
+                    loss.reduction='mean'
 
                 np_loss = loss.data.item()
                 if np.isnan(np_loss):
@@ -431,7 +468,7 @@ n_train = x_train.shape[0] - n_test
                 output = self.neural_net(inputv_this)
                 if self.n_classification_labels:
                     target_this = target_this[:, 0]
-                loss = criterion(output, target_this)
+                loss = criterion(output, target_this).mean()
 
                 loss_vals.append(loss.data.item())
                 batch_sizes.append(batch_actual_size)
